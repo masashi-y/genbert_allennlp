@@ -41,6 +41,7 @@ env \
   train_data_path=datasets/drop_dataset/drop_dataset_train.pickle  \
   validation_data_path=datasets/drop_dataset/drop_dataset_dev.pickle  \
   devices="1,2,3,4"  \      # use four devices
+  pretrained_weights=""  \
 $ allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
 ```
 
