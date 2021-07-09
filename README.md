@@ -22,7 +22,7 @@ Then, preprocess the dataset json files into pickled ones:
 python -m genbert.datasets.drop config/drop_dataset.jsonnet
 ```
 
-which process tha files specified in `train_data_path` and `validation_data_path` in the jsonnet file and can be equivalently written as:
+which process the files specified in `train_data_path` and `validation_data_path` in the jsonnet file and can be equivalently written as:
 
 ```sh
 for target in train dev; do
@@ -42,7 +42,7 @@ env \
   validation_data_path=datasets/drop_dataset/drop_dataset_dev.pickle  \
   devices="1,2,3,4"  \      # use four devices
   pretrained_weights=""  \
-$ allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
+ allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
 ```
 
 ## Using pre-trained models
