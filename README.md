@@ -43,3 +43,16 @@ env \
   devices="1,2,3,4"  \      # use four devices
 $ allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
 ```
+
+## Using pre-trained models
+
+Create a `tar.gz` file containing the pretrained weights (renamed as `weights.th`), `config.json`, and `vocabulary/`, where the latter two files are created in the `results` directory when running training.
+
+```sh
+$ tar tvf ~/work/genbert/model.tar.gz
+ config.json
+ weights.th
+ vocabulary/
+ vocabulary/.lock
+ vocabulary/non_padded_namespaces.txt
+```
