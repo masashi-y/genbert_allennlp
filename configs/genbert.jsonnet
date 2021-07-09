@@ -11,12 +11,12 @@ local pretrained = std.extVar('pretrained_weights');
 
 
 {
-  vocabulary: {
-    type: 'from_files',
-    directory: 'vocabulary',
-    padding_token: '[PAD]',
-    oov_token: '[UNK]',
-  },
+  // vocabulary: {
+  //   type: 'from_files',
+  //   directory: 'vocabulary',
+  //   padding_token: '[PAD]',
+  //   oov_token: '[UNK]',
+  // },
   dataset_reader: {
     type: 'pickled',
   },

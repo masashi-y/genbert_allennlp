@@ -5,7 +5,7 @@ from random import randint, random, shuffle
 
 import jsonlines
 import numpy as np
-import ujson as json
+import json
 from tqdm import tqdm, trange
 
 from genbert.datasets.utils import convert_word_to_number
