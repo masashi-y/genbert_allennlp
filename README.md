@@ -46,7 +46,8 @@ $ allennlp train --serilize-dir results --include-package genbert configs/genber
 
 ## Using pre-trained models
 
-Create a `tar.gz` file containing the pretrained weights (renamed as `weights.th`), `config.json`, and `vocabulary/`, where the latter two files are created in the `results` directory when running training.
+To use pre-trained weights in the original repository,
+create a `tar.gz` file containing the pretrained weights (renamed as `weights.th`), `config.json`, and `vocabulary/`, where the latter two files are created in the `results` directory when running training.
 
 ```sh
 $ tar tvf ~/work/genbert/model.tar.gz
