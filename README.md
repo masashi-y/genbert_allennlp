@@ -45,6 +45,26 @@ env \
  allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
 ```
 
+You can do `Ctrl-C` to interrupt the training loop, at which the `model.tar.gz` is created with the best performing weights until that time.
+
+## Make predictions
+
+When the training has completed, you'll find `model.tar.gz` in the result directory.
+
+With that file, you can perform prediction on test inputs using the best performing weights.
+
+```sh
+allennlp predict --include-package genbert --cuda-device 1 --use-dataset-reader --output-file results/output.jsonl results/model.tar.gz datasets/drop_dataset/drop_dataset_dev.pickle
+```
+
+Or you can calculate the performance scores by:
+
+```sh
+allennlp evaluate --include-package genbert --cuda-device 1 --use-dataset-reader results/model.tar.gz datasets/drop_dataset/drop_dataset_dev.pickle
+```
+
+You can use the original `drop_dataset_dev.json` file as input by changing the `validation_dataset_reader` value in the `genbert.jsonnet` accordingly.
+
 ## Using pre-trained models
 
 To use pre-trained weights in the original repository,
