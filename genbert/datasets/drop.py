@@ -416,7 +416,7 @@ if __name__ == "__main__":
             args.input_file).with_suffix(".pickle")
         logging.info("writing result instances to %s", out_path)
         with open(out_path, "wb") as f:
-            pickle.dump(instances, f)
+            pickle.dump(list(instances), f)
 
     else:
         logging.info(
