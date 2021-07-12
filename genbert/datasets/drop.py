@@ -447,4 +447,4 @@ if __name__ == "__main__":
                 out_path = Path(params[data_path]).with_suffix(".pickle")
                 logging.info("writing result instances to %s", out_path)
                 with out_path.open("wb") as f:
-                    pickle.dump(instances, f)
+                    pickle.dump(list(instances), f)
