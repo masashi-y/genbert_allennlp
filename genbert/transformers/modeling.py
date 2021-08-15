@@ -33,7 +33,7 @@ from allennlp_models.rc import get_best_span
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
-from dentaku.transformers.file_utils import (CONFIG_NAME, WEIGHTS_NAME,
+from genbert.transformers.file_utils import (CONFIG_NAME, WEIGHTS_NAME,
                                              cached_path)
 
 logger = logging.getLogger(__name__)

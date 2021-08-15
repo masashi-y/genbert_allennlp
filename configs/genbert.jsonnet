@@ -12,9 +12,7 @@ local pretrained = std.extVar('pretrained_weights');
 
 {
   dataset_reader: {
-    type: 'my_drop',
-    transformer_model_name: 'bert-base-uncased',
-    include_more_numbers: true,
+    type: 'pickled',
   },
   validation_dataset_reader: {
     type: 'pickled',
@@ -25,7 +23,7 @@ local pretrained = std.extVar('pretrained_weights');
     type: 'genbert',
     bert_model_name_or_config: 'bert-base-uncased',
     max_decoding_steps: 50,
-    prediction_type: 'both',
+    prediction_type: 'generation',
     do_random_shift: true,
     masked_lm_loss_coef: 0.5,
     [if pretrained != '' then 'initializer']: {
