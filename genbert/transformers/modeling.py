@@ -26,13 +26,14 @@ import os
 import sys
 from io import open
 
+import numpy as np
 import torch
 from allennlp.nn import util
 from allennlp_models.rc import get_best_span
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
-from genbert.transformers.file_utils import (CONFIG_NAME, WEIGHTS_NAME,
+from dentaku.transformers.file_utils import (CONFIG_NAME, WEIGHTS_NAME,
                                              cached_path)
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,33 @@ PRETRAINED_CONFIG_ARCHIVE_MAP = {
 }
 BERT_CONFIG_NAME = "bert_config.json"
 TF_WEIGHTS_NAME = "model.ckpt"
+
+
+def prune_linear_layer(layer, index, dim=0):
+    """ Prune a linear layer (a model parameters) to keep only entries in index.
+        Return the pruned layer as a new layer with requires_grad=True.
+        Used to remove heads.
+    """
+    index = index.to(layer.weight.device)
+    W = layer.weight.index_select(dim, index).clone().detach()
+    if layer.bias is not None:
+        if dim == 1:
+            b = layer.bias.clone().detach()
+        else:
+            b = layer.bias[index].clone().detach()
+    new_size = list(layer.weight.size())
+    new_size[dim] = len(index)
+    new_layer = nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(
+        layer.weight.device
+    )
+    new_layer.weight.requires_grad = False
+    new_layer.weight.copy_(W.contiguous())
+    new_layer.weight.requires_grad = True
+    if layer.bias is not None:
+        new_layer.bias.requires_grad = False
+        new_layer.bias.copy_(b.contiguous())
+        new_layer.bias.requires_grad = True
+    return new_layer
 
 
 def load_tf_weights_in_bert(model, tf_checkpoint_path):
@@ -455,6 +483,27 @@ class BertAttention(nn.Module):
             keep_multihead_output=keep_multihead_output,
         )
         self.output = BertSelfOutput(config)
+
+    def prune_heads(self, heads):
+        if len(heads) == 0:
+            return
+        mask = torch.ones(self.self.num_attention_heads,
+                          self.self.attention_head_size)
+        for head in heads:
+            mask[head] = 0
+        mask = mask.view(-1).contiguous().eq(1)
+        index = torch.arange(len(mask))[mask].long()
+        # Prune linear layers
+        self.self.query = prune_linear_layer(self.self.query, index)
+        self.self.key = prune_linear_layer(self.self.key, index)
+        self.self.value = prune_linear_layer(self.self.value, index)
+        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
+        # Update hyper params
+        self.self.num_attention_heads = self.self.num_attention_heads - \
+            len(heads)
+        self.self.all_head_size = (
+            self.self.attention_head_size * self.self.num_attention_heads
+        )
 
     def forward(
         self,
@@ -982,6 +1031,13 @@ class BertModel(BertPreTrainedModel):
         self.pooler = BertPooler(config)
         self.apply(self.init_bert_weights)
 
+    def prune_heads(self, heads_to_prune):
+        """ Prunes heads of the model.
+            heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
+        """
+        for layer, heads in heads_to_prune.items():
+            self.encoder.layer[layer].attention.prune_heads(heads)
+
     def get_multihead_outputs(self):
         """ Gather all multi-head outputs.
             Return: list (layers) of multihead module outputs with gradients
@@ -1189,25 +1245,33 @@ class BertTransformer(BertPreTrainedModel):
     TODO: for exractive QA, include BIO tagging head.
     """
 
-    def __init__(self, config, span_prediction_only=False):
+    def __init__(self, config, prediction_type='both'):
         super(BertTransformer, self).__init__(config)
         self.bert = BertModel(config)
-        self.span_prediction_only = span_prediction_only
+        self.do_span_prediction = prediction_type in ('span', 'both')
+        self.do_generation = prediction_type in ('generation', 'both')
+
         # encoder, decoder share bert - so we apply two separate layers to distinguish
         self.extra_enc_layer = BertPredictionHeadTransform(
             config
         )  # extra encoder specific layer on top of bert
         self.embed = self.bert.embeddings.word_embeddings
-        self.qa_head = SpanExtractionHead(config)  # for span exraction
-        self.extra_dec_layer = BertPredictionHeadTransform(
-            config
-        )  # extra decoder specific layer on top of bert
-        if not self.span_prediction_only:
+
+        if self.do_span_prediction:
+            self.qa_head = SpanExtractionHead(config)  # for span exraction
+
+        if self.do_generation:
+            self.extra_dec_layer = BertPredictionHeadTransform(
+                config
+            )  # extra decoder specific layer on top of bert
+            # for decoding the decoder output
+            self.dec_head = SimpleMLMHead(self.embed)
+
+        if self.do_generation and self.do_span_prediction:
             self.head_type = nn.Linear(
                 config.hidden_size, 2
             )  # to decide which head to use: decoder / extract span
-            # for decoding the decoder output
-            self.dec_head = SimpleMLMHead(self.embed)
+
         self.cls = BertOnlyMLMHead(
             config, self.embed.weight
         )  # for mlm task: extra linear + transform
@@ -1325,6 +1389,24 @@ class BertTransformer(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
         )
 
+        dummy = torch.scalar_tensor(0, dtype=torch.float, device=device)
+
+        if self.do_span_prediction:
+            # extractive answer span: for samples without a valid span span_errors is 1
+            span_log_probs, span_loss, _, _ = self.qa_head(
+                encoder_output,
+                input_mask,
+                token_type_ids,
+                answer_as_question_spans,
+                answer_as_passage_spans,
+            )
+        else:
+            span_log_probs = dummy
+            span_loss = dummy
+
+        if not self.do_generation:
+            return None, span_loss, dummy, span_loss, dummy
+
         # decode
         target_ids_in, target_ids_out = target_ids[:, :-1], target_ids[:, 1:]
         # subsequent mask is applied inside self.bert
@@ -1334,19 +1416,6 @@ class BertTransformer(BertPreTrainedModel):
             memory_tensor=encoder_output,
             src_attention_mask=input_mask,
         )
-
-        # extractive answer span: for samples without a valid span span_errors is 1
-        span_log_probs, span_loss, start_preds, end_preds = self.qa_head(
-            encoder_output,
-            input_mask,
-            token_type_ids,
-            answer_as_question_spans,
-            answer_as_passage_spans,
-        )
-
-        dummy = torch.scalar_tensor(0, dtype=span_loss.dtype, device=device)
-        if self.span_prediction_only:
-            return span_log_probs, span_loss, dummy, span_loss, dummy
 
         # apply extra dec layer and compute the decoder losses wrt left-shifted target seq
 
@@ -1364,24 +1433,31 @@ class BertTransformer(BertPreTrainedModel):
         # for samples without a valid gold span, log prob is a large -ve val,
         # this'll drive the head_type to choose the generative head.
 
-        # answer head type
-        type_logits = self.head_type(pooled_output)  # [bsz, 2]
-        type_log_probs = nn.LogSoftmax(dim=-1)(type_logits)  # [bsz, 2]
-        # compute loss for samples with head_type supervision
-        head_type = self.get1d(head_type)  # [bsz]
-        type_loss = CrossEntropyLoss(ignore_index=-1)(type_logits, head_type)
-        # type_errors = ((type_preds != head_type) & (head_type != -1)) # [bsz]
+        if self.do_span_prediction:  # self.do_generation == True
 
-        # marginalize over head types
-        log_probs_list = [
-            dec_log_probs + type_log_probs[:, 0],
-            span_log_probs + type_log_probs[:, 1],
-        ]
-        all_log_probs = torch.stack(log_probs_list, dim=-1)
-        marginal_log_probs = torch.logsumexp(all_log_probs, -1)
-        loss = -marginal_log_probs.mean()
+            # answer head type
+            type_logits = self.head_type(pooled_output)  # [bsz, 2]
+            type_log_probs = nn.LogSoftmax(dim=-1)(type_logits)  # [bsz, 2]
+            # compute loss for samples with head_type supervision
+            head_type = self.get1d(head_type)  # [bsz]
+            type_loss = CrossEntropyLoss(
+                ignore_index=-1)(type_logits, head_type)
+            # type_errors = ((type_preds != head_type) & (head_type != -1)) # [bsz]
 
-        return marginal_log_probs, loss, dec_loss, span_loss, type_loss
+            # marginalize over head types
+            log_probs_list = [
+                dec_log_probs + type_log_probs[:, 0],
+                span_log_probs + type_log_probs[:, 1],
+            ]
+            all_log_probs = torch.stack(log_probs_list, dim=-1)
+            marginal_log_probs = torch.logsumexp(all_log_probs, -1)
+            loss = -marginal_log_probs.mean()
+
+        else:
+            loss = dec_loss
+            type_loss = dummy
+
+        return None, loss, dec_loss, span_loss, type_loss
 
     def inference(
         self,
@@ -1405,10 +1481,15 @@ class BertTransformer(BertPreTrainedModel):
             input_mask=input_mask,
             random_shift=False,
         )
-        # extractive answer span: only relevant errs are included in span_errors
-        start_preds, end_preds = self.qa_head(
-            encoder_output, input_mask, token_type_ids=token_type_ids
-        )
+
+        if self.do_span_prediction:
+            # extractive answer span: only relevant errs are included in span_errors
+            start_preds, end_preds = self.qa_head(
+                encoder_output, input_mask, token_type_ids=token_type_ids
+            )
+        else:
+            start_preds = torch.zeros_like(input_mask[:, 0], dtype=torch.long)
+            end_preds = start_preds
 
         # decode
         # max_decoding_steps: drop: 20,  numeric syn data: 11
@@ -1419,11 +1500,11 @@ class BertTransformer(BertPreTrainedModel):
             start_ids if start_ids.dim() > 1 else start_ids.unsqueeze(1)
         )  # [bsz, 1]
 
-        if self.span_prediction_only:
-            type_preds = torch.ones_like(start_preds, dtype=torch.long)
+        if not self.do_generation:
+            type_preds = torch.ones_like(input_mask[:, 0], dtype=torch.long)
             return dec_out_ids, type_preds, start_preds, end_preds
 
-        for i in range(
+        for _ in range(
             max_decoding_steps - 1
         ):  # -1 as we included end_tok in max_decoding_steps
             # subsequent mask is applied inside self.bert
@@ -1439,9 +1520,12 @@ class BertTransformer(BertPreTrainedModel):
             dec_out_ids = torch.cat(
                 (dec_out_ids, dec_preds_i), dim=-1)  # [bsz, i+2]
 
-        # answer head type
-        type_logits = self.head_type(pooled_output)  # [bsz, 2]
-        type_preds = type_logits.argmax(dim=-1)
+        if self.do_span_prediction:
+            # answer head type
+            type_logits = self.head_type(pooled_output)  # [bsz, 2]
+            type_preds = type_logits.argmax(dim=-1)
+        else:
+            type_preds = torch.zeros_like(input_mask[:, 0], dtype=torch.long)
 
         return dec_out_ids, type_preds, start_preds, end_preds
         # [bsz, max_decoding_steps], [bsz], [bsz],    [bsz],     [bsz, 2]

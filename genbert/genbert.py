@@ -30,7 +30,7 @@ class GenBERT(Model):
         target_namespace: str = "tokens",
         max_decoding_steps: int = 20,
         masked_lm_loss_coef: float = 1.0,
-        span_prediction_only: bool = False,
+        prediction_type: str = 'both',
         do_random_shift: bool = False,
         initializer: InitializerApplicator = InitializerApplicator(),
         **kwargs,
@@ -39,13 +39,13 @@ class GenBERT(Model):
 
         if isinstance(bert_model_name_or_config, str):
             self._genbert = BertTransformer.from_pretrained(
-                bert_model_name_or_config, span_prediction_only=span_prediction_only
+                bert_model_name_or_config, prediction_type=prediction_type,
             )
             bert_config = self._genbert.config
         else:
             bert_config = BertConfig(30522, **bert_model_name_or_config)
             self._genbert = BertTransformer(
-                bert_config, span_prediction_only=span_prediction_only
+                bert_config, prediction_type=prediction_type,
             )
 
         self.hidden_size = bert_config.hidden_size
@@ -54,7 +54,11 @@ class GenBERT(Model):
         self._masked_lm_loss_coef = masked_lm_loss_coef
         self.max_decoding_steps = max_decoding_steps
         self._target_namespace = target_namespace
-        self._span_prediction_only = span_prediction_only
+
+        assert prediction_type in ('span', 'generation', 'both')
+        self._do_span_prediction = prediction_type in ('span', 'both')
+        self._do_generation = prediction_type in ('generation', 'both')
+
         self._do_random_shift = do_random_shift
 
         self.metrics = Metrics()
@@ -212,10 +216,10 @@ class GenBERT(Model):
                 answer_dict["generation"] = post_process_decoded_output(
                     generated_tokens[i]
                 )
-                if self._span_prediction_only or type_preds[i] == ANSWER_SPAN:
+                if self._do_span_prediction and type_preds[i] == ANSWER_SPAN:
                     answer_dict["answer_type"] = "span"
                     answer_dict["answer"] = answer_dict["span"]
-                elif type_preds[i] == ANSWER_GENERATION:
+                elif self._do_generation and type_preds[i] == ANSWER_GENERATION:
                     answer_dict["answer_type"] = "generation"
                     answer_dict["answer"] = answer_dict["generation"]
                 else:
