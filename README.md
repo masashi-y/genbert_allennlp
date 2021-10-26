@@ -9,7 +9,7 @@ AllenNLP wrapper of
 The latest version of AllenNLP (maybe version >= 2.0 should be fine).
 
 ```sh
-pip install allennlp allennlp-models
+pip install allennlp allennlp-models jsonlines
 ```
 
 ## Dataset preprocessing
@@ -19,7 +19,7 @@ Create `datasets` directory and expand there [the DROP dataset](https://allennlp
 Then, preprocess the dataset json files into pickled ones:
 
 ```sh
-python -m genbert.datasets.drop config/drop_dataset.jsonnet
+python -m genbert.datasets.drop configs/drop_dataset.jsonnet
 ```
 
 which process the files specified in `train_data_path` and `validation_data_path` in the jsonnet file and can be equivalently written as:
@@ -40,9 +40,9 @@ env \
   seed=42 \
   train_data_path=datasets/drop_dataset/drop_dataset_train.pickle  \
   validation_data_path=datasets/drop_dataset/drop_dataset_dev.pickle  \
-  devices="1,2,3,4"  \      # use four devices
+  devices="0,1,2,3"  \      # use four devices
   pretrained_weights=""  \
- allennlp train --serilize-dir results --include-package genbert configs/genbert.jsonnet
+ allennlp train --serialization-dir results --include-package genbert configs/genbert.jsonnet
 ```
 
 You can do `Ctrl-C` to interrupt the training loop, at which the `model.tar.gz` is created with the best performing weights until that time.
@@ -60,7 +60,7 @@ allennlp predict --include-package genbert --cuda-device 1 --use-dataset-reader 
 Or you can calculate the performance scores by:
 
 ```sh
-allennlp evaluate --include-package genbert --cuda-device 1 --use-dataset-reader results/model.tar.gz datasets/drop_dataset/drop_dataset_dev.pickle
+allennlp evaluate --include-package genbert --cuda-device 1 results/model.tar.gz datasets/drop_dataset/drop_dataset_dev.pickle
 ```
 
 You can use the original `drop_dataset_dev.json` file as input by changing the `validation_dataset_reader` value in the `genbert.jsonnet` accordingly.
